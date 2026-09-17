@@ -1,0 +1,6 @@
+{
+  "name": "EduVăn AI Engine",
+  "description": "Trợ lý AI phân tích tác phẩm Văn học Việt Nam, trích xuất từ khóa, sinh câu hỏi phân hóa và chấm điểm tự luận.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
