@@ -18,6 +18,13 @@ import {
   EvaluationResult,
 } from './types';
 
+import {
+  clientExtractKeywords,
+  clientGenerateQuestions,
+  clientEvaluateAnswers,
+  clientExportReport,
+} from './services/clientGeminiService';
+
 import { AlertCircle, X } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -67,7 +74,7 @@ export const App: React.FC = () => {
   if (evaluationSummary !== null || evaluationResults.length > 0) unlockedStages.push('EVALUATION');
   if (markdownReport !== '') unlockedStages.push('REPORT');
 
-  // Standard API Request Wrapper
+  // Standard API Request Wrapper (Supports Express server & Static Host Fallback)
   const apiRequest = async (endpoint: string, body: any) => {
     if (isRequesting.current) {
       return Promise.reject(new Error("Request in progress"));
@@ -77,25 +84,69 @@ export const App: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
+    const savedKey = localStorage.getItem('eduv_gemini_api_key') || '';
+
+    // Fallback executor using client-side Gemini API
+    const runClientFallback = async (reasonMsg?: string) => {
+      if (!savedKey || !savedKey.trim()) {
+        setIsSettingsOpen(true);
+        throw new Error(
+          reasonMsg || 'Website hiện tại đang chạy ở chế độ tĩnh (GitHub Pages). Vui lòng nhấn vào nút Cài đặt (góc trên bên phải) và nhập Gemini API Key của bạn để sử dụng AI!'
+        );
+      }
+
+      const key = savedKey.trim();
+      if (endpoint === '/api/extract-keywords') {
+        return await clientExtractKeywords(key, body.text_content, body.image_files, body.processing_mode);
+      } else if (endpoint === '/api/generate-questions') {
+        return await clientGenerateQuestions(key, body.selected_keywords, body.questions_per_keyword);
+      } else if (endpoint === '/api/evaluate-answers') {
+        return await clientEvaluateAnswers(key, body.user_answers);
+      } else if (endpoint === '/api/export-report') {
+        return await clientExportReport(key, body.text_title, body.questions_data, body.evaluation_results);
+      }
+      throw new Error(`Endpoint không hỗ trợ: ${endpoint}`);
+    };
+
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const savedKey = localStorage.getItem('eduv_gemini_api_key');
-      if (savedKey && savedKey.trim() !== '') {
-        headers['x-gemini-api-key'] = savedKey.trim();
+      // Direct client execution on GitHub Pages or static hosts where no Express backend exists
+      const isStaticHost = window.location.hostname.includes('github.io') || window.location.hostname.includes('netlify.app');
+
+      if (isStaticHost) {
+        return await runClientFallback();
       }
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
+      // Try calling Express backend
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (savedKey && savedKey.trim() !== '') {
+          headers['x-gemini-api-key'] = savedKey.trim();
+        }
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Lỗi từ server (${response.status})`);
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        // 405 Method Not Allowed or 404 Not Found -> Fallback to client Gemini API
+        if (response.status === 405 || response.status === 404) {
+          return await runClientFallback();
+        }
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Lỗi từ server (${response.status})`);
+        }
+
+        return await response.json();
+      } catch (fetchErr: any) {
+        // Fallback if backend server endpoint is unreachable
+        if (fetchErr.message && (fetchErr.message.includes('405') || fetchErr.message.includes('404') || fetchErr.name === 'TypeError')) {
+          return await runClientFallback();
+        }
+        throw fetchErr;
       }
-
-      return await response.json();
     } catch (err: any) {
       if (err.message !== "Request in progress") {
         setError(err.message || 'Đã xảy ra lỗi khi gửi yêu cầu.');
@@ -201,33 +252,17 @@ export const App: React.FC = () => {
         });
       });
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const savedKey = localStorage.getItem('eduv_gemini_api_key');
-      if (savedKey && savedKey.trim() !== '') {
-        headers['x-gemini-api-key'] = savedKey.trim();
-      }
-
-      const response = await fetch('/api/evaluate-answers', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          user_answers: [
-            {
-              question_id: questionId,
-              question_text: foundQuestionText,
-              student_answer: answerText,
-            },
-          ],
-        }),
+      const data = await apiRequest('/api/evaluate-answers', {
+        user_answers: [
+          {
+            question_id: questionId,
+            question_text: foundQuestionText,
+            student_answer: answerText,
+          },
+        ],
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || 'Không thể chấm điểm câu hỏi này');
-      }
-
-      const data = await response.json();
-      if (data.results && data.results.length > 0) {
+      if (data && data.results && data.results.length > 0) {
         const resultItem = data.results[0];
         setSingleEvaluationResults((prev) => ({
           ...prev,
