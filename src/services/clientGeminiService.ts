@@ -16,7 +16,7 @@ const clientGenerateWithRetry = async (client: GoogleGenAI, config: any, maxRetr
     try {
       return await client.models.generateContent({
         ...config,
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
       });
     } catch (error: any) {
       lastError = error;

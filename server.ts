@@ -46,7 +46,7 @@ const generateContentWithRetry = async (client: GoogleGenAI, aiConfig: any, maxR
     try {
       return await client.models.generateContent({
         ...mergedConfig,
-        model: 'gemini-3.5-flash',
+        model: 'gemini-3.6-flash',
       });
     } catch (error: any) {
       lastError = error;
